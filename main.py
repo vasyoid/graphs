@@ -3,11 +3,17 @@ from dataclasses import dataclass
 
 import pygame
 
+from tasks import (
+    adjacency_list_to_incidence_matrix,
+    edges_list_to_incidence_matrix,
+    incidence_matrix_to_adjacency_list,
+)
+
 
 WIDTH = 1100
 HEIGHT = 720
 TOOLBAR_HEIGHT = 76
-LEFT_WIDTH = 760
+LEFT_WIDTH = 720
 PANEL_PADDING = 18
 FPS = 60
 
@@ -36,38 +42,6 @@ OUTPUT_BG = (255, 255, 255)
 ERROR = (185, 62, 62)
 
 
-def edges_list_to_incidence_matrix(
-    vertex_count: int, edges: list[tuple[int, int]], directed: bool
-) -> list[list[int]]:
-    """Task 1: Convert an edges list to an incidence matrix.
-
-    Vertices are numbered from 1 to vertex_count.
-    Edges are pairs like (1, 3).
-    Return a matrix with vertex_count rows and one column per edge.
-    """
-    raise NotImplementedError("Students should implement this function.")
-
-
-def incidence_matrix_to_adjacency_list(
-    incidence_matrix: list[list[int]], directed: bool
-) -> list[list[int]]:
-    """Task 2: Convert an incidence matrix to an adjacency list.
-
-    Return a 1-based adjacency list where result[0] contains neighbors of vertex 1.
-    """
-    raise NotImplementedError("Students should implement this function.")
-
-
-def adjacency_list_to_incidence_matrix(
-    adjacency_list: list[list[int]], directed: bool
-) -> list[list[int]]:
-    """Task 3: Convert an adjacency list to an incidence matrix.
-
-    The adjacency list is 1-based by value: result[0] contains neighbors of vertex 1.
-    """
-    raise NotImplementedError("Students should implement this function.")
-
-
 @dataclass
 class Button:
     rect: pygame.Rect
@@ -78,7 +52,7 @@ class Button:
 class GraphApp:
     def __init__(self) -> None:
         pygame.init()
-        pygame.display.set_caption("Graph Canvas")
+        pygame.display.set_caption("Редактор графов")
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("arial", 18)
@@ -101,12 +75,12 @@ class GraphApp:
 
     def create_buttons(self) -> list[Button]:
         specs = [
-            ("Add", "add"),
-            ("Move", "move"),
-            ("Edge", "edge"),
-            ("Remove", "remove"),
-            ("Directed: off", "toggle_directed"),
-            ("Clear", "clear"),
+            ("Добавить", "add"),
+            ("Двигать", "move"),
+            ("Ребро", "edge"),
+            ("Удалить", "remove"),
+            ("Ориент.: нет", "toggle_directed"),
+            ("Очистить", "clear"),
         ]
         buttons: list[Button] = []
         x = 12
@@ -121,9 +95,9 @@ class GraphApp:
         y = 82
         width = WIDTH - LEFT_WIDTH - PANEL_PADDING * 2
         labels = [
-            ("Edges list -> incidence matrix", "edges_to_incidence"),
-            ("Incidence matrix -> adjacency list", "incidence_to_adjacency"),
-            ("Adjacency list -> incidence matrix", "adjacency_to_incidence"),
+            ("Список ребер -> матрица инцидентности", "edges_to_incidence"),
+            ("Матрица инцидентности -> список смежности", "incidence_to_adjacency"),
+            ("Список смежности -> матрица инцидентности", "adjacency_to_incidence"),
         ]
         return [
             Button(pygame.Rect(x, y + index * 48, width, 38), label, action)
@@ -223,7 +197,7 @@ class GraphApp:
 
     def toggle_directed(self) -> None:
         self.directed = not self.directed
-        self.buttons[4].label = f"Directed: {'on' if self.directed else 'off'}"
+        self.buttons[4].label = f"Ориент.: {'да' if self.directed else 'нет'}"
         if not self.directed:
             self.edges = self.deduplicate_undirected_edges(self.edges)
         self.selected_vertex = None
@@ -334,15 +308,21 @@ class GraphApp:
 
     def draw_status(self) -> None:
         hints = {
-            "add": "Click empty canvas space to add a numbered vertex.",
-            "move": "Drag a vertex to move it.",
-            "edge": "Click two vertices to add an edge.",
-            "remove": "Click a vertex to remove it; remaining vertices renumber automatically.",
+            "add": "Щелкните по пустому месту холста, чтобы добавить вершину.",
+            "move": "Перетащите вершину, чтобы переместить ее.",
+            "edge": "Щелкните по двум вершинам, чтобы добавить ребро.",
+            "remove": "Щелкните по вершине, чтобы удалить ее; остальные вершины перенумеруются.",
         }
-        orientation = "directed" if self.directed else "undirected"
+        orientation = "ориентированный" if self.directed else "неориентированный"
+        mode_names = {
+            "add": "добавление",
+            "move": "перемещение",
+            "edge": "добавление ребра",
+            "remove": "удаление",
+        }
         text = (
-            f"Mode: {self.mode} | Graph: {orientation} | "
-            f"Vertices: {len(self.vertices)} | Edges: {len(self.edges)}"
+            f"Режим: {mode_names[self.mode]} | Граф: {orientation} | "
+            f"Вершин: {len(self.vertices)} | Ребер: {len(self.edges)}"
         )
         status = self.small_font.render(text, True, MUTED)
         hint = self.small_font.render(hints[self.mode], True, MUTED)
@@ -350,11 +330,11 @@ class GraphApp:
         self.screen.blit(hint, (18, HEIGHT - 24))
 
     def draw_right_panel(self) -> None:
-        title = self.font.render("Student tasks", True, TEXT)
+        title = self.font.render("Задания для студентов", True, TEXT)
         self.screen.blit(title, (LEFT_WIDTH + PANEL_PADDING, 24))
 
         subtitle = self.small_font.render(
-            "Choose a conversion function to run on the left graph.", True, MUTED
+            "Выберите функцию преобразования для графа слева.", True, MUTED
         )
         self.screen.blit(subtitle, (LEFT_WIDTH + PANEL_PADDING, 50))
 
@@ -376,16 +356,13 @@ class GraphApp:
         pygame.draw.rect(self.screen, OUTPUT_BG, output_rect, border_radius=8)
         pygame.draw.rect(self.screen, CANVAS_BORDER, output_rect, 1, border_radius=8)
 
-        output_title = self.font.render("Function output graph", True, TEXT)
-        self.screen.blit(output_title, (output_rect.x, output_rect.y - 32))
-
         if self.task_error:
             self.draw_wrapped_text(self.task_error, output_rect.inflate(-28, -28), ERROR)
         else:
             self.draw_preview_graph(output_rect)
 
         footer = self.small_font.render(
-            "Implement the task functions at the top of main.py.", True, MUTED
+            "Реализуйте функции заданий в файле tasks.py.", True, MUTED
         )
         self.screen.blit(footer, (LEFT_WIDTH + PANEL_PADDING, HEIGHT - 44))
 
@@ -437,7 +414,7 @@ class GraphApp:
             self.task_error = str(error)
         except (TypeError, ValueError, IndexError) as error:
             self.preview_edges = []
-            self.task_error = f"The selected function returned invalid data: {error}"
+            self.task_error = f"Выбранная функция вернула некорректные данные: {error}"
 
     def run_selected_task(self) -> list[tuple[int, int]]:
         vertex_count = len(self.vertices)
@@ -479,9 +456,9 @@ class GraphApp:
     ) -> list[list[int]]:
         adjacency_list = [[] for _ in range(vertex_count)]
         for start, end in edges:
-            adjacency_list[start - 1].append(end)
+            adjacency_list[start - 1].append(end - 1)
             if not directed:
-                adjacency_list[end - 1].append(start)
+                adjacency_list[end - 1].append(start - 1)
         return adjacency_list
 
     def zero_based_edges_from_adjacency_list(
@@ -491,10 +468,10 @@ class GraphApp:
         for start, neighbors in enumerate(adjacency_list):
             for end in neighbors:
                 if not isinstance(end, int):
-                    raise TypeError("adjacency list values must be integers")
-                edge = (start, end - 1)
+                    raise TypeError("значения в списке смежности должны быть целыми числами")
+                edge = (start, end)
                 if edge[1] < 0 or edge[1] >= len(adjacency_list):
-                    raise ValueError("adjacency list contains a vertex outside the graph")
+                    raise ValueError("список смежности содержит вершину вне графа")
                 edges.append(edge if directed else self.normalized_edge(*edge))
         return edges if directed else self.deduplicate_undirected_edges(edges)
 
@@ -506,7 +483,7 @@ class GraphApp:
 
         column_count = len(matrix[0])
         if any(len(row) != column_count for row in matrix):
-            raise ValueError("incidence matrix rows must have the same length")
+            raise ValueError("строки матрицы инцидентности должны быть одинаковой длины")
 
         edges: list[tuple[int, int]] = []
         for column in range(column_count):
@@ -515,12 +492,16 @@ class GraphApp:
                 starts = [index for index, value in enumerate(values) if value == -1]
                 ends = [index for index, value in enumerate(values) if value == 1]
                 if len(starts) != 1 or len(ends) != 1:
-                    raise ValueError("each directed incidence column needs one -1 and one 1")
+                    raise ValueError(
+                        "каждый столбец ориентированной матрицы должен содержать один -1 и один 1"
+                    )
                 edges.append((starts[0], ends[0]))
             else:
                 endpoints = [index for index, value in enumerate(values) if value == 1]
                 if len(endpoints) != 2:
-                    raise ValueError("each undirected incidence column needs two 1 values")
+                    raise ValueError(
+                        "каждый столбец неориентированной матрицы должен содержать две 1"
+                    )
                 edges.append((endpoints[0], endpoints[1]))
         return edges if directed else self.deduplicate_undirected_edges(edges)
 
