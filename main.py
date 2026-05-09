@@ -1,4 +1,3 @@
-import math
 from dataclasses import dataclass
 
 import pygame
@@ -506,7 +505,7 @@ class GraphApp:
         return edges if directed else self.deduplicate_undirected_edges(edges)
 
     def draw_preview_graph(self, rect: pygame.Rect) -> None:
-        positions = self.preview_positions(rect, len(self.vertices))
+        positions = self.preview_positions(rect)
         for start, end in self.preview_edges:
             if start < len(positions) and end < len(positions):
                 self.draw_edge_between(positions[start], positions[end], self.directed)
@@ -517,22 +516,34 @@ class GraphApp:
             text = self.vertex_font.render(str(index + 1), True, TEXT)
             self.screen.blit(text, text.get_rect(center=position))
 
-    def preview_positions(self, rect: pygame.Rect, vertex_count: int) -> list[pygame.Vector2]:
-        if vertex_count == 0:
+    def preview_positions(self, rect: pygame.Rect) -> list[pygame.Vector2]:
+        if not self.vertices:
             return []
 
-        center = pygame.Vector2(rect.center)
-        radius = max(44, min(rect.width, rect.height) * 0.34)
-        positions: list[pygame.Vector2] = []
-        for index in range(vertex_count):
-            angle = -math.pi / 2 + 2 * math.pi * index / vertex_count
-            positions.append(
-                pygame.Vector2(
-                    center.x + math.cos(angle) * radius,
-                    center.y + math.sin(angle) * radius,
-                )
-            )
-        return positions
+        content_rect = rect.inflate(-VERTEX_RADIUS * 3, -VERTEX_RADIUS * 3)
+        min_x = min(vertex.x for vertex in self.vertices)
+        max_x = max(vertex.x for vertex in self.vertices)
+        min_y = min(vertex.y for vertex in self.vertices)
+        max_y = max(vertex.y for vertex in self.vertices)
+
+        graph_width = max_x - min_x
+        graph_height = max_y - min_y
+
+        if graph_width == 0 and graph_height == 0:
+            return [pygame.Vector2(content_rect.center)]
+
+        scale_x = content_rect.width / graph_width if graph_width else float("inf")
+        scale_y = content_rect.height / graph_height if graph_height else float("inf")
+        scale = min(scale_x, scale_y, 1.0)
+
+        scaled_width = graph_width * scale
+        scaled_height = graph_height * scale
+        offset = pygame.Vector2(
+            content_rect.centerx - scaled_width / 2 - min_x * scale,
+            content_rect.centery - scaled_height / 2 - min_y * scale,
+        )
+
+        return [vertex * scale + offset for vertex in self.vertices]
 
     def draw_edge_between(
         self, start: pygame.Vector2, end: pygame.Vector2, directed: bool
