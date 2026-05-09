@@ -5,6 +5,8 @@ import pygame
 from tasks import (
     adjacency_list_to_adjacency_matrix,
     adjacency_matrix_to_adjacency_list,
+    connected_components,
+    depth_first_search,
     edges_list_to_adjacency_matrix,
 )
 
@@ -39,6 +41,16 @@ BUTTON_ACTIVE = (205, 219, 248)
 PANEL_BG = (241, 244, 249)
 OUTPUT_BG = (255, 255, 255)
 ERROR = (185, 62, 62)
+DFS_ACTIVE = (255, 199, 85)
+DFS_DONE = (91, 170, 113)
+COMPONENT_COLORS = [
+    (91, 170, 113),
+    (255, 199, 85),
+    (91, 141, 239),
+    (224, 103, 117),
+    (166, 113, 216),
+    (65, 180, 176),
+]
 
 
 @dataclass
@@ -68,9 +80,17 @@ class GraphApp:
         self.selected_task = "edges_to_matrix"
         self.task_error = ""
         self.preview_edges: list[tuple[int, int]] = []
+        self.preview_mode = "graph"
+        self.dfs_start_vertex = 0
+        self.dfs_order: list[int] = []
+        self.dfs_animation_running = False
+        self.dfs_visible_count = 0
+        self.components: list[list[int]] = []
+        self.animation_started_at = pygame.time.get_ticks()
 
         self.buttons = self.create_buttons()
         self.task_buttons = self.create_task_buttons()
+        self.dfs_buttons = self.create_dfs_buttons()
 
     def create_buttons(self) -> list[Button]:
         specs = [
@@ -97,10 +117,22 @@ class GraphApp:
             ("Список ребер -> матрица смежности", "edges_to_matrix"),
             ("Матрица смежности -> список смежности", "matrix_to_adjacency"),
             ("Список смежности -> матрица смежности", "adjacency_to_matrix"),
+            ("Поиск в глубину", "dfs"),
+            ("Компоненты связности", "components"),
         ]
         return [
             Button(pygame.Rect(x, y + index * 48, width, 38), label, action)
             for index, (label, action) in enumerate(labels)
+        ]
+
+    def create_dfs_buttons(self) -> list[Button]:
+        y = 322
+        return [
+            Button(
+                pygame.Rect(WIDTH - PANEL_PADDING - 98, y, 98, 32),
+                "Старт",
+                "dfs_toggle",
+            )
         ]
 
     def run(self) -> None:
@@ -148,9 +180,25 @@ class GraphApp:
 
         clicked_task = self.task_button_at(pos)
         if clicked_task is not None:
+            if self.selected_task != clicked_task.action:
+                self.animation_started_at = pygame.time.get_ticks()
+                self.dfs_animation_running = False
+                self.dfs_visible_count = 0
             self.selected_task = clicked_task.action
             self.selected_vertex = None
             self.dragging_vertex = None
+            return
+
+        clicked_dfs_button = self.dfs_button_at(pos)
+        if clicked_dfs_button is not None:
+            self.handle_dfs_button(clicked_dfs_button)
+            return
+
+        preview_vertex = self.preview_vertex_at(pos)
+        if preview_vertex is not None:
+            self.dfs_start_vertex = preview_vertex
+            self.dfs_animation_running = False
+            self.dfs_visible_count = 0
             return
 
         if not self.in_canvas(pos):
@@ -188,6 +236,22 @@ class GraphApp:
             self.edges.clear()
             self.selected_vertex = None
             self.dragging_vertex = None
+
+    def handle_dfs_button(self, button: Button) -> None:
+        if not self.vertices:
+            self.dfs_start_vertex = 0
+            self.dfs_animation_running = False
+            self.dfs_visible_count = 0
+            return
+
+        if button.action == "dfs_toggle":
+            if self.dfs_animation_running:
+                self.dfs_animation_running = False
+                self.dfs_visible_count = 0
+            else:
+                self.dfs_visible_count = 0
+                self.animation_started_at = pygame.time.get_ticks()
+                self.dfs_animation_running = True
 
     def set_mode(self, mode: str) -> None:
         self.mode = mode
@@ -333,7 +397,7 @@ class GraphApp:
         self.screen.blit(title, (LEFT_WIDTH + PANEL_PADDING, 24))
 
         subtitle = self.small_font.render(
-            "Выберите функцию преобразования для графа слева.", True, MUTED
+            "Выберите задание для графа слева.", True, MUTED
         )
         self.screen.blit(subtitle, (LEFT_WIDTH + PANEL_PADDING, 50))
 
@@ -346,12 +410,21 @@ class GraphApp:
             label = self.small_font.render(button.label, True, TEXT)
             self.screen.blit(label, label.get_rect(center=button.rect.center))
 
-        output_rect = pygame.Rect(
-            LEFT_WIDTH + PANEL_PADDING,
-            246,
-            WIDTH - LEFT_WIDTH - PANEL_PADDING * 2,
-            HEIGHT - 316,
-        )
+        if self.selected_task == "dfs":
+            label = self.small_font.render(
+                f"Стартовая вершина: {self.dfs_start_vertex}", True, TEXT
+            )
+            self.screen.blit(label, (LEFT_WIDTH + PANEL_PADDING, 330))
+            for button in self.dfs_buttons:
+                is_hovered = button.rect.collidepoint(self.mouse_pos)
+                color = BUTTON_HOVER if is_hovered else BUTTON
+                pygame.draw.rect(self.screen, color, button.rect, border_radius=8)
+                pygame.draw.rect(self.screen, CANVAS_BORDER, button.rect, 1, border_radius=8)
+                label = "Стоп" if button.action == "dfs_toggle" and self.dfs_animation_running else button.label
+                text = self.font.render(label, True, TEXT)
+                self.screen.blit(text, text.get_rect(center=button.rect.center))
+
+        output_rect = self.preview_rect()
         pygame.draw.rect(self.screen, OUTPUT_BG, output_rect, border_radius=8)
         pygame.draw.rect(self.screen, CANVAS_BORDER, output_rect, 1, border_radius=8)
 
@@ -376,6 +449,33 @@ class GraphApp:
             if button.rect.collidepoint(pos):
                 return button
         return None
+
+    def dfs_button_at(self, pos: tuple[int, int]) -> Button | None:
+        if self.selected_task != "dfs":
+            return None
+        for button in self.dfs_buttons:
+            if button.rect.collidepoint(pos):
+                return button
+        return None
+
+    def preview_vertex_at(self, pos: tuple[int, int]) -> int | None:
+        if self.selected_task != "dfs" or self.task_error:
+            return None
+        positions = self.preview_positions(self.preview_rect())
+        point = pygame.Vector2(pos)
+        for index in range(len(positions) - 1, -1, -1):
+            if point.distance_to(positions[index]) <= VERTEX_RADIUS:
+                return index
+        return None
+
+    @staticmethod
+    def preview_rect() -> pygame.Rect:
+        return pygame.Rect(
+            LEFT_WIDTH + PANEL_PADDING,
+            374,
+            WIDTH - LEFT_WIDTH - PANEL_PADDING * 2,
+            HEIGHT - 444,
+        )
 
     def vertex_at(self, pos: tuple[int, int]) -> int | None:
         point = pygame.Vector2(pos)
@@ -406,13 +506,35 @@ class GraphApp:
 
     def update_preview(self) -> None:
         try:
+            if self.vertices:
+                self.dfs_start_vertex = min(self.dfs_start_vertex, len(self.vertices) - 1)
+            else:
+                self.dfs_start_vertex = 0
+                self.dfs_animation_running = False
+                self.dfs_visible_count = 0
+            self.preview_mode = "graph"
+            self.dfs_order = []
+            self.components = []
             self.preview_edges = self.run_selected_task()
+            if self.preview_mode == "dfs" and self.dfs_animation_running:
+                visible_count = self.current_dfs_visible_count()
+                if visible_count >= len(self.dfs_order):
+                    self.dfs_visible_count = len(self.dfs_order)
+                    self.dfs_animation_running = False
             self.task_error = ""
         except NotImplementedError as error:
             self.preview_edges = []
+            self.dfs_order = []
+            self.dfs_animation_running = False
+            self.dfs_visible_count = 0
+            self.components = []
             self.task_error = str(error)
         except (TypeError, ValueError, IndexError) as error:
             self.preview_edges = []
+            self.dfs_order = []
+            self.dfs_animation_running = False
+            self.dfs_visible_count = 0
+            self.components = []
             self.task_error = f"Выбранная функция вернула некорректные данные: {error}"
 
     def run_selected_task(self) -> list[tuple[int, int]]:
@@ -427,6 +549,20 @@ class GraphApp:
             matrix = self.build_adjacency_matrix(vertex_count, edges, self.directed)
             adjacency_list = adjacency_matrix_to_adjacency_list(matrix, self.directed)
             return self.zero_based_edges_from_adjacency_list(adjacency_list, self.directed)
+
+        if self.selected_task == "dfs":
+            adjacency_list = self.build_adjacency_list(vertex_count, edges, self.directed)
+            self.dfs_order = depth_first_search(adjacency_list, self.dfs_start_vertex)
+            self.validate_vertex_list(self.dfs_order, vertex_count)
+            self.preview_mode = "dfs"
+            return list(self.edges)
+
+        if self.selected_task == "components":
+            adjacency_list = self.build_adjacency_list(vertex_count, edges, False)
+            self.components = connected_components(adjacency_list)
+            self.validate_components(self.components, vertex_count)
+            self.preview_mode = "components"
+            return list(self.edges)
 
         adjacency_list = self.build_adjacency_list(vertex_count, edges, self.directed)
         matrix = adjacency_list_to_adjacency_matrix(adjacency_list, self.directed)
@@ -496,17 +632,81 @@ class GraphApp:
                     edges.append((start, end))
         return edges if directed else self.deduplicate_undirected_edges(edges)
 
+    @staticmethod
+    def validate_vertex_list(vertices: list[int], vertex_count: int) -> None:
+        for vertex in vertices:
+            if not isinstance(vertex, int):
+                raise TypeError("номера вершин должны быть целыми числами")
+            if vertex < 0 or vertex >= vertex_count:
+                raise ValueError("список содержит вершину вне графа")
+
+    def validate_components(
+        self, components: list[list[int]], vertex_count: int
+    ) -> None:
+        seen: set[int] = set()
+        for component in components:
+            self.validate_vertex_list(component, vertex_count)
+            for vertex in component:
+                if vertex in seen:
+                    raise ValueError("вершина встречается в нескольких компонентах")
+                seen.add(vertex)
+
     def draw_preview_graph(self, rect: pygame.Rect) -> None:
         positions = self.preview_positions(rect)
         for start, end in self.preview_edges:
             if start < len(positions) and end < len(positions):
                 self.draw_edge_between(positions[start], positions[end], self.directed)
 
+        vertex_fills = self.preview_vertex_fills(len(positions))
         for index, position in enumerate(positions):
-            pygame.draw.circle(self.screen, VERTEX, position, VERTEX_RADIUS)
+            pygame.draw.circle(self.screen, vertex_fills[index], position, VERTEX_RADIUS)
             pygame.draw.circle(self.screen, GREEN, position, VERTEX_RADIUS, 3)
             text = self.vertex_font.render(str(index), True, TEXT)
             self.screen.blit(text, text.get_rect(center=position))
+
+        self.draw_preview_caption(rect)
+
+    def preview_vertex_fills(self, vertex_count: int) -> list[tuple[int, int, int]]:
+        fills = [VERTEX for _ in range(vertex_count)]
+
+        if self.preview_mode == "dfs":
+            visible_count = self.current_dfs_visible_count()
+            visible_vertices = self.dfs_order[:visible_count]
+            for vertex in visible_vertices[:-1]:
+                if 0 <= vertex < vertex_count:
+                    fills[vertex] = DFS_DONE
+            if visible_vertices:
+                active_vertex = visible_vertices[-1]
+                if 0 <= active_vertex < vertex_count:
+                    fills[active_vertex] = DFS_ACTIVE
+
+        elif self.preview_mode == "components":
+            for component_index, component in enumerate(self.components):
+                color = COMPONENT_COLORS[component_index % len(COMPONENT_COLORS)]
+                for vertex in component:
+                    if 0 <= vertex < vertex_count:
+                        fills[vertex] = color
+
+        return fills
+
+    def current_dfs_visible_count(self) -> int:
+        if not self.dfs_animation_running:
+            return min(self.dfs_visible_count, len(self.dfs_order))
+
+        elapsed = pygame.time.get_ticks() - self.animation_started_at
+        return min(len(self.dfs_order), elapsed // 700 + 1)
+
+    def draw_preview_caption(self, rect: pygame.Rect) -> None:
+        if self.preview_mode == "dfs":
+            state = "идет" if self.dfs_animation_running else "остановлена"
+            text = f"DFS ({state}): {self.dfs_order}"
+        elif self.preview_mode == "components":
+            text = f"Компоненты: {self.components}"
+        else:
+            return
+
+        caption_rect = pygame.Rect(rect.x + 12, rect.bottom - 28, rect.width - 24, 20)
+        self.draw_wrapped_text(text, caption_rect, MUTED)
 
     def preview_positions(self, rect: pygame.Rect) -> list[pygame.Vector2]:
         if not self.vertices:
