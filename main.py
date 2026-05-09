@@ -104,7 +104,9 @@ class GraphApp:
         buttons: list[Button] = []
         x = 12
         for label, action in specs:
-            width = 92 if action != "toggle_directed" else 134
+            width = 82
+            if action == "toggle_directed":
+                width = 116
             buttons.append(Button(pygame.Rect(x, 18, width, 40), label, action))
             x += width + 8
         return buttons
@@ -214,6 +216,10 @@ class GraphApp:
         elif self.mode == "remove":
             if vertex_index is not None:
                 self.remove_vertex(vertex_index)
+            else:
+                edge_index = self.edge_at(pos)
+                if edge_index is not None:
+                    del self.edges[edge_index]
         elif self.mode == "edge":
             if vertex_index is not None:
                 self.handle_edge_click(vertex_index)
@@ -374,7 +380,7 @@ class GraphApp:
             "add": "Щелкните по пустому месту холста, чтобы добавить вершину.",
             "move": "Перетащите вершину, чтобы переместить ее.",
             "edge": "Щелкните по двум вершинам, чтобы добавить ребро.",
-            "remove": "Щелкните по вершине, чтобы удалить ее; остальные вершины перенумеруются.",
+            "remove": "Щелкните по вершине или ребру, чтобы удалить выбранный элемент.",
         }
         orientation = "ориентированный" if self.directed else "неориентированный"
         mode_names = {
@@ -483,6 +489,37 @@ class GraphApp:
             if point.distance_to(self.vertices[index]) <= VERTEX_RADIUS:
                 return index
         return None
+
+    def edge_at(self, pos: tuple[int, int]) -> int | None:
+        point = pygame.Vector2(pos)
+        best_index = None
+        best_distance = 12.0
+
+        for index, (start, end) in enumerate(self.edges):
+            if start >= len(self.vertices) or end >= len(self.vertices):
+                continue
+
+            distance = self.distance_to_segment(
+                point, self.vertices[start], self.vertices[end]
+            )
+            if distance < best_distance:
+                best_distance = distance
+                best_index = index
+
+        return best_index
+
+    @staticmethod
+    def distance_to_segment(
+        point: pygame.Vector2, start: pygame.Vector2, end: pygame.Vector2
+    ) -> float:
+        segment = end - start
+        if segment.length_squared() == 0:
+            return point.distance_to(start)
+
+        projection = (point - start).dot(segment) / segment.length_squared()
+        projection = max(0.0, min(1.0, projection))
+        closest = start + segment * projection
+        return point.distance_to(closest)
 
     @staticmethod
     def in_canvas(pos: tuple[int, int]) -> bool:
