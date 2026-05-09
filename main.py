@@ -73,9 +73,10 @@ class GraphApp:
         self.vertices: list[pygame.Vector2] = []
         self.edges: list[tuple[int, int]] = []
         self.directed = False
-        self.mode = "add"
+        self.mode = "edit"
         self.selected_vertex: int | None = None
         self.dragging_vertex: int | None = None
+        self.drag_moved = False
         self.mouse_pos = pygame.Vector2(0, 0)
         self.selected_task = "edges_to_matrix"
         self.task_error = ""
@@ -94,9 +95,7 @@ class GraphApp:
 
     def create_buttons(self) -> list[Button]:
         specs = [
-            ("Добавить", "add"),
-            ("Двигать", "move"),
-            ("Ребро", "edge"),
+            ("Правка", "edit"),
             ("Удалить", "remove"),
             ("Ориент.: нет", "toggle_directed"),
             ("Очистить", "clear"),
@@ -147,7 +146,7 @@ class GraphApp:
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     self.handle_mouse_down(event.pos)
                 elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-                    self.dragging_vertex = None
+                    self.handle_mouse_up()
                 elif event.type == pygame.MOUSEMOTION:
                     self.handle_mouse_motion(event.pos)
                 elif event.type == pygame.KEYDOWN:
@@ -161,11 +160,7 @@ class GraphApp:
 
     def handle_key_down(self, key: int) -> None:
         if key == pygame.K_a:
-            self.set_mode("add")
-        elif key == pygame.K_m:
-            self.set_mode("move")
-        elif key == pygame.K_e:
-            self.set_mode("edge")
+            self.set_mode("edit")
         elif key in (pygame.K_DELETE, pygame.K_BACKSPACE, pygame.K_r):
             self.set_mode("remove")
         elif key == pygame.K_d:
@@ -207,12 +202,13 @@ class GraphApp:
             return
 
         vertex_index = self.vertex_at(pos)
-        if self.mode == "add":
+        if self.mode == "edit":
             if vertex_index is None:
+                self.selected_vertex = None
                 self.vertices.append(pygame.Vector2(pos))
-        elif self.mode == "move":
-            if vertex_index is not None:
+            else:
                 self.dragging_vertex = vertex_index
+                self.drag_moved = False
         elif self.mode == "remove":
             if vertex_index is not None:
                 self.remove_vertex(vertex_index)
@@ -220,9 +216,6 @@ class GraphApp:
                 edge_index = self.edge_at(pos)
                 if edge_index is not None:
                     del self.edges[edge_index]
-        elif self.mode == "edge":
-            if vertex_index is not None:
-                self.handle_edge_click(vertex_index)
 
     def handle_mouse_motion(self, pos: tuple[int, int]) -> None:
         if self.dragging_vertex is None:
@@ -230,10 +223,20 @@ class GraphApp:
 
         x = min(max(pos[0], VERTEX_RADIUS), LEFT_WIDTH - VERTEX_RADIUS)
         y = min(max(pos[1], TOOLBAR_HEIGHT + VERTEX_RADIUS), HEIGHT - VERTEX_RADIUS)
+        if self.vertices[self.dragging_vertex].distance_to((x, y)) > 2:
+            self.drag_moved = True
         self.vertices[self.dragging_vertex] = pygame.Vector2(x, y)
 
+    def handle_mouse_up(self) -> None:
+        if self.mode == "edit" and self.dragging_vertex is not None:
+            if not self.drag_moved:
+                self.handle_edge_click(self.dragging_vertex)
+
+        self.dragging_vertex = None
+        self.drag_moved = False
+
     def handle_button(self, button: Button) -> None:
-        if button.action in {"add", "move", "edge", "remove"}:
+        if button.action in {"edit", "remove"}:
             self.set_mode(button.action)
         elif button.action == "toggle_directed":
             self.toggle_directed()
@@ -263,10 +266,11 @@ class GraphApp:
         self.mode = mode
         self.selected_vertex = None
         self.dragging_vertex = None
+        self.drag_moved = False
 
     def toggle_directed(self) -> None:
         self.directed = not self.directed
-        self.buttons[4].label = f"Ориент.: {'да' if self.directed else 'нет'}"
+        self.buttons[2].label = f"Ориент.: {'да' if self.directed else 'нет'}"
         if not self.directed:
             self.edges = self.deduplicate_undirected_edges(self.edges)
         self.selected_vertex = None
@@ -377,16 +381,12 @@ class GraphApp:
 
     def draw_status(self) -> None:
         hints = {
-            "add": "Щелкните по пустому месту холста, чтобы добавить вершину.",
-            "move": "Перетащите вершину, чтобы переместить ее.",
-            "edge": "Щелкните по двум вершинам, чтобы добавить ребро.",
+            "edit": "Клик по вершине выбирает ее для ребра; пустое место добавляет вершину.",
             "remove": "Щелкните по вершине или ребру, чтобы удалить выбранный элемент.",
         }
         orientation = "ориентированный" if self.directed else "неориентированный"
         mode_names = {
-            "add": "добавление",
-            "move": "перемещение",
-            "edge": "добавление ребра",
+            "edit": "правка",
             "remove": "удаление",
         }
         text = (
