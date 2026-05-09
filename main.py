@@ -3,9 +3,9 @@ from dataclasses import dataclass
 import pygame
 
 from tasks import (
-    adjacency_list_to_incidence_matrix,
-    edges_list_to_incidence_matrix,
-    incidence_matrix_to_adjacency_list,
+    adjacency_list_to_adjacency_matrix,
+    adjacency_matrix_to_adjacency_list,
+    edges_list_to_adjacency_matrix,
 )
 
 
@@ -65,7 +65,7 @@ class GraphApp:
         self.selected_vertex: int | None = None
         self.dragging_vertex: int | None = None
         self.mouse_pos = pygame.Vector2(0, 0)
-        self.selected_task = "edges_to_incidence"
+        self.selected_task = "edges_to_matrix"
         self.task_error = ""
         self.preview_edges: list[tuple[int, int]] = []
 
@@ -94,9 +94,9 @@ class GraphApp:
         y = 82
         width = WIDTH - LEFT_WIDTH - PANEL_PADDING * 2
         labels = [
-            ("Список ребер -> матрица инцидентности", "edges_to_incidence"),
-            ("Матрица инцидентности -> список смежности", "incidence_to_adjacency"),
-            ("Список смежности -> матрица инцидентности", "adjacency_to_incidence"),
+            ("Список ребер -> матрица смежности", "edges_to_matrix"),
+            ("Матрица смежности -> список смежности", "matrix_to_adjacency"),
+            ("Список смежности -> матрица смежности", "adjacency_to_matrix"),
         ]
         return [
             Button(pygame.Rect(x, y + index * 48, width, 38), label, action)
@@ -302,7 +302,7 @@ class GraphApp:
             pygame.draw.circle(self.screen, fill, position, VERTEX_RADIUS)
             pygame.draw.circle(self.screen, border, position, VERTEX_RADIUS, 3)
 
-            text = self.vertex_font.render(str(index + 1), True, TEXT)
+            text = self.vertex_font.render(str(index), True, TEXT)
             self.screen.blit(text, text.get_rect(center=position))
 
     def draw_status(self) -> None:
@@ -417,36 +417,33 @@ class GraphApp:
 
     def run_selected_task(self) -> list[tuple[int, int]]:
         vertex_count = len(self.vertices)
-        edges = self.one_based_edges()
+        edges = self.zero_based_edges()
 
-        if self.selected_task == "edges_to_incidence":
-            matrix = edges_list_to_incidence_matrix(vertex_count, edges, self.directed)
-            return self.zero_based_edges_from_incidence_matrix(matrix, self.directed)
+        if self.selected_task == "edges_to_matrix":
+            matrix = edges_list_to_adjacency_matrix(vertex_count, edges, self.directed)
+            return self.zero_based_edges_from_adjacency_matrix(matrix, self.directed)
 
-        if self.selected_task == "incidence_to_adjacency":
-            matrix = self.build_incidence_matrix(vertex_count, edges, self.directed)
-            adjacency_list = incidence_matrix_to_adjacency_list(matrix, self.directed)
+        if self.selected_task == "matrix_to_adjacency":
+            matrix = self.build_adjacency_matrix(vertex_count, edges, self.directed)
+            adjacency_list = adjacency_matrix_to_adjacency_list(matrix, self.directed)
             return self.zero_based_edges_from_adjacency_list(adjacency_list, self.directed)
 
         adjacency_list = self.build_adjacency_list(vertex_count, edges, self.directed)
-        matrix = adjacency_list_to_incidence_matrix(adjacency_list, self.directed)
-        return self.zero_based_edges_from_incidence_matrix(matrix, self.directed)
+        matrix = adjacency_list_to_adjacency_matrix(adjacency_list, self.directed)
+        return self.zero_based_edges_from_adjacency_matrix(matrix, self.directed)
 
-    def one_based_edges(self) -> list[tuple[int, int]]:
-        return [(start + 1, end + 1) for start, end in self.edges]
+    def zero_based_edges(self) -> list[tuple[int, int]]:
+        return list(self.edges)
 
     @staticmethod
-    def build_incidence_matrix(
+    def build_adjacency_matrix(
         vertex_count: int, edges: list[tuple[int, int]], directed: bool
     ) -> list[list[int]]:
-        matrix = [[0 for _ in edges] for _ in range(vertex_count)]
-        for column, (start, end) in enumerate(edges):
-            if directed:
-                matrix[start - 1][column] = -1
-                matrix[end - 1][column] = 1
-            else:
-                matrix[start - 1][column] = 1
-                matrix[end - 1][column] = 1
+        matrix = [[0 for _ in range(vertex_count)] for _ in range(vertex_count)]
+        for start, end in edges:
+            matrix[start][end] = 1
+            if not directed:
+                matrix[end][start] = 1
         return matrix
 
     @staticmethod
@@ -455,9 +452,9 @@ class GraphApp:
     ) -> list[list[int]]:
         adjacency_list = [[] for _ in range(vertex_count)]
         for start, end in edges:
-            adjacency_list[start - 1].append(end - 1)
+            adjacency_list[start].append(end)
             if not directed:
-                adjacency_list[end - 1].append(start - 1)
+                adjacency_list[end].append(start)
         return adjacency_list
 
     def zero_based_edges_from_adjacency_list(
@@ -474,34 +471,29 @@ class GraphApp:
                 edges.append(edge if directed else self.normalized_edge(*edge))
         return edges if directed else self.deduplicate_undirected_edges(edges)
 
-    def zero_based_edges_from_incidence_matrix(
+    def zero_based_edges_from_adjacency_matrix(
         self, matrix: list[list[int]], directed: bool
     ) -> list[tuple[int, int]]:
         if not matrix:
             return []
 
-        column_count = len(matrix[0])
-        if any(len(row) != column_count for row in matrix):
-            raise ValueError("строки матрицы инцидентности должны быть одинаковой длины")
+        vertex_count = len(matrix)
+        if any(len(row) != vertex_count for row in matrix):
+            raise ValueError("матрица смежности должна быть квадратной")
 
         edges: list[tuple[int, int]] = []
-        for column in range(column_count):
-            values = [row[column] for row in matrix]
-            if directed:
-                starts = [index for index, value in enumerate(values) if value == -1]
-                ends = [index for index, value in enumerate(values) if value == 1]
-                if len(starts) != 1 or len(ends) != 1:
-                    raise ValueError(
-                        "каждый столбец ориентированной матрицы должен содержать один -1 и один 1"
-                    )
-                edges.append((starts[0], ends[0]))
-            else:
-                endpoints = [index for index, value in enumerate(values) if value == 1]
-                if len(endpoints) != 2:
-                    raise ValueError(
-                        "каждый столбец неориентированной матрицы должен содержать две 1"
-                    )
-                edges.append((endpoints[0], endpoints[1]))
+        for start, row in enumerate(matrix):
+            for end, value in enumerate(row):
+                if value != 1:
+                    continue
+                if directed:
+                    edges.append((start, end))
+                elif start < end:
+                    if matrix[end][start] != 1:
+                        raise ValueError(
+                            "матрица смежности неориентированного графа должна быть симметричной"
+                        )
+                    edges.append((start, end))
         return edges if directed else self.deduplicate_undirected_edges(edges)
 
     def draw_preview_graph(self, rect: pygame.Rect) -> None:
@@ -513,7 +505,7 @@ class GraphApp:
         for index, position in enumerate(positions):
             pygame.draw.circle(self.screen, VERTEX, position, VERTEX_RADIUS)
             pygame.draw.circle(self.screen, GREEN, position, VERTEX_RADIUS, 3)
-            text = self.vertex_font.render(str(index + 1), True, TEXT)
+            text = self.vertex_font.render(str(index), True, TEXT)
             self.screen.blit(text, text.get_rect(center=position))
 
     def preview_positions(self, rect: pygame.Rect) -> list[pygame.Vector2]:
