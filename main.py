@@ -1,4 +1,6 @@
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 import pygame
 
@@ -17,6 +19,7 @@ TOOLBAR_HEIGHT = 76
 LEFT_WIDTH = 720
 PANEL_PADDING = 18
 FPS = 60
+STATE_FILE = Path(__file__).with_name("graph_state.json")
 
 VERTEX_RADIUS = 24
 EDGE_WIDTH = 3
@@ -89,6 +92,7 @@ class GraphApp:
         self.components: list[list[int]] = []
         self.animation_started_at = pygame.time.get_ticks()
 
+        self.load_graph_state()
         self.buttons = self.create_buttons()
         self.task_buttons = self.create_task_buttons()
         self.dfs_buttons = self.create_dfs_buttons()
@@ -97,7 +101,7 @@ class GraphApp:
         specs = [
             ("Правка", "edit"),
             ("Удалить", "remove"),
-            ("Ориент.: нет", "toggle_directed"),
+            (f"Ориент.: {'да' if self.directed else 'нет'}", "toggle_directed"),
             ("Очистить", "clear"),
         ]
         buttons: list[Button] = []
@@ -206,6 +210,7 @@ class GraphApp:
             if vertex_index is None:
                 self.selected_vertex = None
                 self.vertices.append(pygame.Vector2(pos))
+                self.save_graph_state()
             else:
                 self.dragging_vertex = vertex_index
                 self.drag_moved = False
@@ -216,6 +221,7 @@ class GraphApp:
                 edge_index = self.edge_at(pos)
                 if edge_index is not None:
                     del self.edges[edge_index]
+                    self.save_graph_state()
 
     def handle_mouse_motion(self, pos: tuple[int, int]) -> None:
         if self.dragging_vertex is None:
@@ -226,6 +232,7 @@ class GraphApp:
         if self.vertices[self.dragging_vertex].distance_to((x, y)) > 2:
             self.drag_moved = True
         self.vertices[self.dragging_vertex] = pygame.Vector2(x, y)
+        self.save_graph_state()
 
     def handle_mouse_up(self) -> None:
         if self.mode == "edit" and self.dragging_vertex is not None:
@@ -245,6 +252,7 @@ class GraphApp:
             self.edges.clear()
             self.selected_vertex = None
             self.dragging_vertex = None
+            self.save_graph_state()
 
     def handle_dfs_button(self, button: Button) -> None:
         if not self.vertices:
@@ -274,6 +282,7 @@ class GraphApp:
         if not self.directed:
             self.edges = self.deduplicate_undirected_edges(self.edges)
         self.selected_vertex = None
+        self.save_graph_state()
 
     def handle_edge_click(self, vertex_index: int) -> None:
         if self.selected_vertex is None:
@@ -290,6 +299,7 @@ class GraphApp:
         edge = (start, end) if self.directed else self.normalized_edge(start, end)
         if edge not in self.edges:
             self.edges.append(edge)
+            self.save_graph_state()
 
     def remove_vertex(self, vertex_index: int) -> None:
         del self.vertices[vertex_index]
@@ -307,6 +317,68 @@ class GraphApp:
         )
         self.selected_vertex = None
         self.dragging_vertex = None
+        self.save_graph_state()
+
+    def load_graph_state(self) -> None:
+        if not STATE_FILE.exists():
+            return
+
+        try:
+            with STATE_FILE.open("r", encoding="utf-8") as file:
+                data = json.load(file)
+        except (OSError, json.JSONDecodeError):
+            return
+
+        vertices = data.get("vertices", [])
+        edges = data.get("edges", [])
+        directed = data.get("directed", False)
+
+        if not isinstance(vertices, list) or not isinstance(edges, list):
+            return
+
+        loaded_vertices: list[pygame.Vector2] = []
+        for vertex in vertices:
+            if (
+                isinstance(vertex, list)
+                and len(vertex) == 2
+                and all(isinstance(value, (int, float)) for value in vertex)
+            ):
+                x = min(max(float(vertex[0]), VERTEX_RADIUS), LEFT_WIDTH - VERTEX_RADIUS)
+                y = min(max(float(vertex[1]), TOOLBAR_HEIGHT + VERTEX_RADIUS), HEIGHT - VERTEX_RADIUS)
+                loaded_vertices.append(pygame.Vector2(x, y))
+
+        loaded_edges: list[tuple[int, int]] = []
+        for edge in edges:
+            if (
+                isinstance(edge, list)
+                and len(edge) == 2
+                and all(isinstance(value, int) for value in edge)
+            ):
+                start, end = edge
+                if 0 <= start < len(loaded_vertices) and 0 <= end < len(loaded_vertices):
+                    if start != end:
+                        loaded_edges.append((start, end))
+
+        self.vertices = loaded_vertices
+        self.directed = bool(directed)
+        self.edges = (
+            loaded_edges
+            if self.directed
+            else self.deduplicate_undirected_edges(loaded_edges)
+        )
+
+    def save_graph_state(self) -> None:
+        data = {
+            "directed": self.directed,
+            "vertices": [[vertex.x, vertex.y] for vertex in self.vertices],
+            "edges": [[start, end] for start, end in self.edges],
+        }
+
+        try:
+            with STATE_FILE.open("w", encoding="utf-8") as file:
+                json.dump(data, file, ensure_ascii=False, indent=2)
+        except OSError:
+            pass
 
     def draw(self) -> None:
         self.screen.fill(BG)
