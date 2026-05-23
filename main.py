@@ -24,6 +24,7 @@ FPS = 60
 STATE_FILE = Path(__file__).with_name("graph_state.json")
 
 VERTEX_RADIUS = 24
+MIN_PREVIEW_VERTEX_RADIUS = 10
 EDGE_WIDTH = 3
 ARROW_SIZE = 14
 
@@ -572,9 +573,10 @@ class GraphApp:
         if self.selected_task not in {"dfs", "bfs", "shortest_path"}:
             return None
         positions = self.preview_positions(self.preview_rect())
+        radius = self.preview_vertex_radius(positions)
         point = pygame.Vector2(pos)
         for index in range(len(positions) - 1, -1, -1):
-            if point.distance_to(positions[index]) <= VERTEX_RADIUS:
+            if point.distance_to(positions[index]) <= radius:
                 return index
         return None
 
@@ -885,9 +887,12 @@ class GraphApp:
 
     def draw_preview_graph(self, rect: pygame.Rect) -> None:
         positions = self.preview_positions(rect)
+        radius = self.preview_vertex_radius(positions)
         for start, end in self.preview_edges:
             if start < len(positions) and end < len(positions):
-                self.draw_edge_between(positions[start], positions[end], self.directed)
+                self.draw_edge_between(
+                    positions[start], positions[end], self.directed, radius=radius
+                )
 
         if self.preview_mode == "shortest_path":
             for start, end in zip(
@@ -900,13 +905,15 @@ class GraphApp:
                         self.directed,
                         PATH_COLOR,
                         EDGE_WIDTH + 2,
+                        radius,
                     )
 
         vertex_fills = self.preview_vertex_fills(len(positions))
+        preview_font = self.preview_vertex_font(radius)
         for index, position in enumerate(positions):
-            pygame.draw.circle(self.screen, vertex_fills[index], position, VERTEX_RADIUS)
-            pygame.draw.circle(self.screen, GREEN, position, VERTEX_RADIUS, 3)
-            text = self.vertex_font.render(str(index), True, TEXT)
+            pygame.draw.circle(self.screen, vertex_fills[index], position, radius)
+            pygame.draw.circle(self.screen, GREEN, position, radius, 3)
+            text = preview_font.render(str(index), True, TEXT)
             self.screen.blit(text, text.get_rect(center=position))
 
         self.draw_preview_caption(rect)
@@ -996,6 +1003,24 @@ class GraphApp:
 
         return [vertex * scale + offset for vertex in self.vertices]
 
+    @staticmethod
+    def preview_vertex_radius(positions: list[pygame.Vector2]) -> int:
+        if len(positions) < 2:
+            return VERTEX_RADIUS
+
+        min_distance = min(
+            positions[first].distance_to(positions[second])
+            for first in range(len(positions))
+            for second in range(first + 1, len(positions))
+        )
+        radius = min(VERTEX_RADIUS, int(min_distance / 2) - 3)
+        return max(MIN_PREVIEW_VERTEX_RADIUS, radius)
+
+    @staticmethod
+    def preview_vertex_font(radius: int) -> pygame.font.Font:
+        size = max(10, min(22, int(radius * 0.9)))
+        return pygame.font.SysFont("arial", size, bold=True)
+
     def draw_edge_between(
         self,
         start: pygame.Vector2,
@@ -1003,14 +1028,15 @@ class GraphApp:
         directed: bool,
         color: tuple[int, int, int] = EDGE,
         width: int = EDGE_WIDTH,
+        radius: int = VERTEX_RADIUS,
     ) -> None:
         direction = end - start
         if direction.length_squared() == 0:
             return
 
         unit = direction.normalize()
-        line_start = start + unit * VERTEX_RADIUS
-        line_end = end - unit * VERTEX_RADIUS
+        line_start = start + unit * radius
+        line_end = end - unit * radius
         pygame.draw.line(self.screen, color, line_start, line_end, width)
 
         if directed:
