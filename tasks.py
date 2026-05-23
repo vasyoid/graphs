@@ -82,3 +82,35 @@ def connected_components(adjacency_list: list[list[int]]) -> list[list[int]]:
     Каждая компонента -- это список номеров вершин.
     """
     raise NotImplementedError("Функция не реализована.")
+
+
+def breadth_first_search(adjacency_list: list[list[int]], start_vertex: int) -> list[int]:
+    """Задание 6: выполнить поиск в ширину.
+
+    Эту функцию нужно реализовать самостоятельно.
+
+    Аргументы:
+    adjacency_list -- список смежности с нумерацией вершин с 0.
+    start_vertex -- номер вершины, с которой нужно начать обход.
+
+    Нужно вернуть список вершин в порядке обхода.
+    """
+    raise NotImplementedError("Функция не реализована.")
+
+
+def shortest_path(
+    adjacency_list: list[list[int]], start_vertex: int, end_vertex: int
+) -> list[int]:
+    """Задание 7: найти кратчайший путь в графе.
+
+    Эту функцию нужно реализовать самостоятельно.
+
+    Аргументы:
+    adjacency_list -- список смежности с нумерацией вершин с 0.
+    start_vertex -- номер начальной вершины.
+    end_vertex -- номер конечной вершины.
+
+    Нужно вернуть список вершин на кратчайшем пути от start_vertex до end_vertex.
+    Если пути нет, верните пустой список.
+    """
+    raise NotImplementedError("Функция не реализована.")

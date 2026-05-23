@@ -7,9 +7,11 @@ import pygame
 from tasks import (
     adjacency_list_to_adjacency_matrix,
     adjacency_matrix_to_adjacency_list,
+    breadth_first_search,
     connected_components,
     depth_first_search,
     edges_list_to_adjacency_matrix,
+    shortest_path,
 )
 
 
@@ -54,6 +56,7 @@ COMPONENT_COLORS = [
     (166, 113, 216),
     (65, 180, 176),
 ]
+PATH_COLOR = (238, 91, 75)
 
 
 @dataclass
@@ -90,6 +93,10 @@ class GraphApp:
         self.dfs_animation_running = False
         self.dfs_visible_count = 0
         self.components: list[list[int]] = []
+        self.path_start_vertex = 0
+        self.path_end_vertex = 0
+        self.path_pick_target = "start"
+        self.shortest_path_vertices: list[int] = []
         self.animation_started_at = pygame.time.get_ticks()
 
         self.load_graph_state()
@@ -116,7 +123,7 @@ class GraphApp:
 
     def create_task_buttons(self) -> list[Button]:
         x = LEFT_WIDTH + PANEL_PADDING
-        y = 82
+        y = 78
         width = WIDTH - LEFT_WIDTH - PANEL_PADDING * 2
         labels = [
             ("Список ребер -> матрица смежности", "edges_to_matrix"),
@@ -124,9 +131,11 @@ class GraphApp:
             ("Список смежности -> матрица смежности", "adjacency_to_matrix"),
             ("Поиск в глубину", "dfs"),
             ("Компоненты связности", "components"),
+            ("Поиск в ширину", "bfs"),
+            ("Кратчайший путь", "shortest_path"),
         ]
         return [
-            Button(pygame.Rect(x, y + index * 48, width, 38), label, action)
+            Button(pygame.Rect(x, y + index * 34, width, 30), label, action)
             for index, (label, action) in enumerate(labels)
         ]
 
@@ -197,9 +206,7 @@ class GraphApp:
 
         preview_vertex = self.preview_vertex_at(pos)
         if preview_vertex is not None:
-            self.dfs_start_vertex = preview_vertex
-            self.dfs_animation_running = False
-            self.dfs_visible_count = 0
+            self.handle_preview_vertex_click(preview_vertex)
             return
 
         if not self.in_canvas(pos):
@@ -269,6 +276,19 @@ class GraphApp:
                 self.dfs_visible_count = 0
                 self.animation_started_at = pygame.time.get_ticks()
                 self.dfs_animation_running = True
+
+    def handle_preview_vertex_click(self, vertex: int) -> None:
+        if self.selected_task in {"dfs", "bfs"}:
+            self.dfs_start_vertex = vertex
+            self.dfs_animation_running = False
+            self.dfs_visible_count = 0
+        elif self.selected_task == "shortest_path":
+            if self.path_pick_target == "start":
+                self.path_start_vertex = vertex
+                self.path_pick_target = "end"
+            else:
+                self.path_end_vertex = vertex
+                self.path_pick_target = "start"
 
     def set_mode(self, mode: str) -> None:
         self.mode = mode
@@ -435,11 +455,13 @@ class GraphApp:
         if self.directed:
             self.draw_arrow_head(line_end, unit)
 
-    def draw_arrow_head(self, tip: pygame.Vector2, unit: pygame.Vector2) -> None:
+    def draw_arrow_head(
+        self, tip: pygame.Vector2, unit: pygame.Vector2, color: tuple[int, int, int] = EDGE
+    ) -> None:
         left = unit.rotate(150) * ARROW_SIZE
         right = unit.rotate(-150) * ARROW_SIZE
         points = [tip, tip + left, tip + right]
-        pygame.draw.polygon(self.screen, EDGE, points)
+        pygame.draw.polygon(self.screen, color, points)
 
     def draw_vertices(self) -> None:
         for index, position in enumerate(self.vertices):
@@ -488,7 +510,7 @@ class GraphApp:
             label = self.small_font.render(button.label, True, TEXT)
             self.screen.blit(label, label.get_rect(center=button.rect.center))
 
-        if self.selected_task == "dfs":
+        if self.selected_task in {"dfs", "bfs"}:
             label = self.small_font.render(
                 f"Стартовая вершина: {self.dfs_start_vertex}", True, TEXT
             )
@@ -501,6 +523,16 @@ class GraphApp:
                 label = "Стоп" if button.action == "dfs_toggle" and self.dfs_animation_running else button.label
                 text = self.font.render(label, True, TEXT)
                 self.screen.blit(text, text.get_rect(center=button.rect.center))
+        elif self.selected_task == "shortest_path":
+            label = self.small_font.render(
+                f"Начало: {self.path_start_vertex} | Конец: {self.path_end_vertex}",
+                True,
+                TEXT,
+            )
+            self.screen.blit(label, (LEFT_WIDTH + PANEL_PADDING, 326))
+            hint = "следующий клик задает начало" if self.path_pick_target == "start" else "следующий клик задает конец"
+            hint_surface = self.small_font.render(hint, True, MUTED)
+            self.screen.blit(hint_surface, (LEFT_WIDTH + PANEL_PADDING, 346))
 
         output_rect = self.preview_rect()
         pygame.draw.rect(self.screen, OUTPUT_BG, output_rect, border_radius=8)
@@ -529,7 +561,7 @@ class GraphApp:
         return None
 
     def dfs_button_at(self, pos: tuple[int, int]) -> Button | None:
-        if self.selected_task != "dfs":
+        if self.selected_task not in {"dfs", "bfs"}:
             return None
         for button in self.dfs_buttons:
             if button.rect.collidepoint(pos):
@@ -537,7 +569,7 @@ class GraphApp:
         return None
 
     def preview_vertex_at(self, pos: tuple[int, int]) -> int | None:
-        if self.selected_task != "dfs" or self.task_error:
+        if self.selected_task not in {"dfs", "bfs", "shortest_path"}:
             return None
         positions = self.preview_positions(self.preview_rect())
         point = pygame.Vector2(pos)
@@ -617,15 +649,20 @@ class GraphApp:
         try:
             if self.vertices:
                 self.dfs_start_vertex = min(self.dfs_start_vertex, len(self.vertices) - 1)
+                self.path_start_vertex = min(self.path_start_vertex, len(self.vertices) - 1)
+                self.path_end_vertex = min(self.path_end_vertex, len(self.vertices) - 1)
             else:
                 self.dfs_start_vertex = 0
+                self.path_start_vertex = 0
+                self.path_end_vertex = 0
                 self.dfs_animation_running = False
                 self.dfs_visible_count = 0
             self.preview_mode = "graph"
             self.dfs_order = []
             self.components = []
+            self.shortest_path_vertices = []
             self.preview_edges = self.run_selected_task()
-            if self.preview_mode == "dfs" and self.dfs_animation_running:
+            if self.preview_mode in {"dfs", "bfs"} and self.dfs_animation_running:
                 visible_count = self.current_dfs_visible_count()
                 if visible_count >= len(self.dfs_order):
                     self.dfs_visible_count = len(self.dfs_order)
@@ -637,6 +674,7 @@ class GraphApp:
             self.dfs_animation_running = False
             self.dfs_visible_count = 0
             self.components = []
+            self.shortest_path_vertices = []
             self.task_error = str(error)
         except (TypeError, ValueError, IndexError) as error:
             self.preview_edges = []
@@ -644,6 +682,7 @@ class GraphApp:
             self.dfs_animation_running = False
             self.dfs_visible_count = 0
             self.components = []
+            self.shortest_path_vertices = []
             self.task_error = f"Выбранная функция вернула некорректные данные: {error}"
 
     def run_selected_task(self) -> list[tuple[int, int]]:
@@ -660,10 +699,23 @@ class GraphApp:
             return self.zero_based_edges_from_adjacency_list(adjacency_list, self.directed)
 
         if self.selected_task == "dfs":
+            if vertex_count == 0:
+                self.preview_mode = "dfs"
+                return list(self.edges)
             adjacency_list = self.build_adjacency_list(vertex_count, edges, self.directed)
             self.dfs_order = depth_first_search(adjacency_list, self.dfs_start_vertex)
             self.validate_vertex_list(self.dfs_order, vertex_count)
             self.preview_mode = "dfs"
+            return list(self.edges)
+
+        if self.selected_task == "bfs":
+            if vertex_count == 0:
+                self.preview_mode = "bfs"
+                return list(self.edges)
+            adjacency_list = self.build_adjacency_list(vertex_count, edges, self.directed)
+            self.dfs_order = breadth_first_search(adjacency_list, self.dfs_start_vertex)
+            self.validate_vertex_list(self.dfs_order, vertex_count)
+            self.preview_mode = "bfs"
             return list(self.edges)
 
         if self.selected_task == "components":
@@ -671,6 +723,23 @@ class GraphApp:
             self.components = connected_components(adjacency_list)
             self.validate_components(self.components, vertex_count)
             self.preview_mode = "components"
+            return list(self.edges)
+
+        if self.selected_task == "shortest_path":
+            if vertex_count == 0:
+                self.preview_mode = "shortest_path"
+                return list(self.edges)
+            adjacency_list = self.build_adjacency_list(vertex_count, edges, self.directed)
+            self.shortest_path_vertices = shortest_path(
+                adjacency_list, self.path_start_vertex, self.path_end_vertex
+            )
+            self.validate_shortest_path(
+                adjacency_list,
+                self.shortest_path_vertices,
+                self.path_start_vertex,
+                self.path_end_vertex,
+            )
+            self.preview_mode = "shortest_path"
             return list(self.edges)
 
         adjacency_list = self.build_adjacency_list(vertex_count, edges, self.directed)
@@ -760,11 +829,78 @@ class GraphApp:
                     raise ValueError("вершина встречается в нескольких компонентах")
                 seen.add(vertex)
 
+    def validate_shortest_path(
+        self,
+        adjacency_list: list[list[int]],
+        path: list[int],
+        start_vertex: int,
+        end_vertex: int,
+    ) -> None:
+        self.validate_vertex_list(path, len(adjacency_list))
+        shortest_distance = self.shortest_distance(adjacency_list, start_vertex, end_vertex)
+
+        if shortest_distance is None:
+            if path:
+                raise ValueError("путь найден, хотя между выбранными вершинами пути нет")
+            return
+
+        if not path:
+            raise ValueError("путь существует, но функция вернула пустой список")
+        if path[0] != start_vertex or path[-1] != end_vertex:
+            raise ValueError("путь должен начинаться и заканчиваться выбранными вершинами")
+
+        for start, end in zip(path, path[1:]):
+            if end not in adjacency_list[start]:
+                raise ValueError("в пути есть переход между несмежными вершинами")
+
+        if len(path) - 1 != shortest_distance:
+            raise ValueError("вернувшийся путь не является кратчайшим")
+
+    @staticmethod
+    def shortest_distance(
+        adjacency_list: list[list[int]], start_vertex: int, end_vertex: int
+    ) -> int | None:
+        if start_vertex < 0 or start_vertex >= len(adjacency_list):
+            return None
+        if end_vertex < 0 or end_vertex >= len(adjacency_list):
+            return None
+
+        queue = [(start_vertex, 0)]
+        visited = {start_vertex}
+        head = 0
+
+        while head < len(queue):
+            vertex, distance = queue[head]
+            head += 1
+
+            if vertex == end_vertex:
+                return distance
+
+            for neighbor in adjacency_list[vertex]:
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append((neighbor, distance + 1))
+
+        return None
+
     def draw_preview_graph(self, rect: pygame.Rect) -> None:
         positions = self.preview_positions(rect)
         for start, end in self.preview_edges:
             if start < len(positions) and end < len(positions):
                 self.draw_edge_between(positions[start], positions[end], self.directed)
+
+        if self.preview_mode == "shortest_path":
+            for start, end in zip(
+                self.shortest_path_vertices, self.shortest_path_vertices[1:]
+            ):
+                if start < len(positions) and end < len(positions):
+                    self.draw_edge_between(
+                        positions[start],
+                        positions[end],
+                        self.directed,
+                        PATH_COLOR,
+                        EDGE_WIDTH + 2,
+                    )
 
         vertex_fills = self.preview_vertex_fills(len(positions))
         for index, position in enumerate(positions):
@@ -778,7 +914,7 @@ class GraphApp:
     def preview_vertex_fills(self, vertex_count: int) -> list[tuple[int, int, int]]:
         fills = [VERTEX for _ in range(vertex_count)]
 
-        if self.preview_mode == "dfs":
+        if self.preview_mode in {"dfs", "bfs"}:
             visible_count = self.current_dfs_visible_count()
             visible_vertices = self.dfs_order[:visible_count]
             for vertex in visible_vertices[:-1]:
@@ -796,6 +932,15 @@ class GraphApp:
                     if 0 <= vertex < vertex_count:
                         fills[vertex] = color
 
+        elif self.preview_mode == "shortest_path":
+            for vertex in self.shortest_path_vertices:
+                if 0 <= vertex < vertex_count:
+                    fills[vertex] = PATH_COLOR
+            if 0 <= self.path_start_vertex < vertex_count:
+                fills[self.path_start_vertex] = DFS_ACTIVE
+            if 0 <= self.path_end_vertex < vertex_count:
+                fills[self.path_end_vertex] = DFS_DONE
+
         return fills
 
     def current_dfs_visible_count(self) -> int:
@@ -809,8 +954,13 @@ class GraphApp:
         if self.preview_mode == "dfs":
             state = "идет" if self.dfs_animation_running else "остановлена"
             text = f"DFS ({state}): {self.dfs_order}"
+        elif self.preview_mode == "bfs":
+            state = "идет" if self.dfs_animation_running else "остановлена"
+            text = f"BFS ({state}): {self.dfs_order}"
         elif self.preview_mode == "components":
             text = f"Компоненты: {self.components}"
+        elif self.preview_mode == "shortest_path":
+            text = f"Путь: {self.shortest_path_vertices}"
         else:
             return
 
@@ -847,7 +997,12 @@ class GraphApp:
         return [vertex * scale + offset for vertex in self.vertices]
 
     def draw_edge_between(
-        self, start: pygame.Vector2, end: pygame.Vector2, directed: bool
+        self,
+        start: pygame.Vector2,
+        end: pygame.Vector2,
+        directed: bool,
+        color: tuple[int, int, int] = EDGE,
+        width: int = EDGE_WIDTH,
     ) -> None:
         direction = end - start
         if direction.length_squared() == 0:
@@ -856,10 +1011,10 @@ class GraphApp:
         unit = direction.normalize()
         line_start = start + unit * VERTEX_RADIUS
         line_end = end - unit * VERTEX_RADIUS
-        pygame.draw.line(self.screen, EDGE, line_start, line_end, EDGE_WIDTH)
+        pygame.draw.line(self.screen, color, line_start, line_end, width)
 
         if directed:
-            self.draw_arrow_head(line_end, unit)
+            self.draw_arrow_head(line_end, unit, color)
 
     def draw_wrapped_text(self, text: str, rect: pygame.Rect, color: tuple[int, int, int]) -> None:
         words = text.split()
